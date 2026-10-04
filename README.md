@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="multimeter.svg" width="420" alt="Multímetro en ASCII girando 360°, marcando 115 V de corriente alterna"/>
+<img src="multimeter-terminal.svg" width="420" alt="Multímetro en ASCII girando 360°, marcando 115 V de corriente alterna"/>
 
 # ascii-multimeter
 
@@ -27,7 +27,7 @@ de GitHub sin JavaScript ni GIFs.
 ```bash
 pip install -r requirements.txt
 
-py multimeter.py            # regenera multimeter.svg
+py multimeter.py            # regenera multimeter.svg y multimeter-terminal.svg
 py multimeter_cli.py        # lo hace girar en la terminal (Ctrl+C para salir)
 py multimeter_cli.py --fps 15
 ```
