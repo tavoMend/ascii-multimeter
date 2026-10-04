@@ -13,6 +13,7 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parent
 OUT = ROOT / "multimeter.svg"
+OUT_TERMINAL = ROOT / "multimeter-terminal.svg"
 
 FONT = "'Fira Code','JetBrains Mono','Cascadia Code',Consolas,'Courier New',monospace"
 BG = "#020a09"
@@ -385,6 +386,30 @@ def main():
 '''
     OUT.write_text(svg, encoding="utf-8")
     print(f"{OUT.relative_to(ROOT).as_posix()}  ({len(svg.encode()) // 1024} KB)")
+
+    # versión terminal: lo mismo que muestra multimeter_cli.py, sin efectos encima
+    tw, th = (COLS + 4) * CW, (ROWS + 5) * CH
+    plain = f'''<svg xmlns="http://www.w3.org/2000/svg" width="{tw}" height="{th}" viewBox="0 0 {tw} {th}" role="img" aria-label="Multímetro digital en ASCII girando 360 grados, marcando 115 V de corriente alterna">
+<title>Multímetro ASCII — 115.0 V~ — spin 360°</title>
+<style>
+  text {{ font-family: {FONT}; font-size: 11px; font-weight: 700; fill: {MID}; }}
+  {palette}
+  .f {{ opacity: 0; animation: show {DURATION}s steps(1) infinite; }}
+  @keyframes show {{ 0% {{ opacity: 1; }} {pct:.4f}% {{ opacity: 0; }} 100% {{ opacity: 0; }} }}
+  .c {{ fill: {CYAN}; }}
+  .ft {{ fill: {DIM}; }}
+  @media (prefers-reduced-motion: reduce) {{ .f {{ animation: none; }} .f:first-of-type {{ opacity: 1; }} }}
+</style>
+<rect width="{tw}" height="{th}" fill="#0c0c0c"/>
+<text x="{2 * CW}" y="{CH}" xml:space="preserve">~ $ <tspan class="c">./multimeter --spin 360</tspan></text>
+<g transform="translate({2 * CW},{2 * CH})">
+{chr(10).join(frames)}
+</g>
+<text class="ft" x="{2 * CW}" y="{(ROWS + 4) * CH}">// AC 115.0 V - 60 Hz - RANGE 200</text>
+</svg>
+'''
+    OUT_TERMINAL.write_text(plain, encoding="utf-8")
+    print(f"{OUT_TERMINAL.relative_to(ROOT).as_posix()}  ({len(plain.encode()) // 1024} KB)")
 
 
 if __name__ == "__main__":
