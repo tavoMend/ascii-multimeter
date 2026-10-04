@@ -1,0 +1,44 @@
+<div align="center">
+
+<img src="multimeter.svg" width="420" alt="Multímetro en ASCII girando 360°, marcando 115 V de corriente alterna"/>
+
+# ascii-multimeter
+
+Un multímetro 3D renderizado con caracteres ASCII, girando 360° y midiendo **115 V~** (corriente alterna, 60 Hz).
+
+</div>
+
+## Cómo funciona
+
+El multímetro no está dibujado a mano: es un modelo 3D construido con funciones de distancia
+(cuerpo, bumper, display, perilla, jacks y puntas de prueba). Para cada uno de los 36 ángulos
+de la vuelta, `multimeter.py` lanza un rayo por carácter (*ray marching* con numpy), calcula la
+iluminación de la superficie que toca y la traduce a un carácter de la rampa de ese material.
+El display LCD se dibuja como una textura de 22×7 caracteres con una fuente de 3×5.
+
+Los frames se empaquetan en un único SVG animado con CSS, así que funciona en cualquier README
+de GitHub sin JavaScript ni GIFs.
+
+## Uso
+
+```bash
+pip install -r requirements.txt
+
+py multimeter.py            # regenera multimeter.svg
+py multimeter_cli.py        # lo hace girar en la terminal (Ctrl+C para salir)
+py multimeter_cli.py --fps 15
+```
+
+La versión de terminal usa colores de 24 bits (cmd y PowerShell en Windows 10/11, Windows Terminal,
+o cualquier terminal moderna). La primera ejecución tarda unos segundos en calcular los frames;
+después se cargan desde caché.
+
+## Personalizar
+
+- **Lectura del display:** `READING` en `multimeter.py` (dígitos, `.`, `V` y `~`).
+- **Colores:** las constantes al inicio de `multimeter.py` y la sección `<style>` del SVG.
+- **Velocidad y suavidad:** `FRAMES` y `DURATION`.
+
+---
+
+<div align="center"><sub>Hecho por <a href="https://github.com/tavoMend">Gustavo Mendoza</a></sub></div>
