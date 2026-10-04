@@ -12,13 +12,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from multimeter import CYAN, COLS, DIM, FRAMES, GREEN, ICE, MID, READING, ROWS, render  # noqa: E402
-
-COLORS = {
-    "d": DIM, "m": MID, "b": CYAN, "h": ICE,
-    "s": "#0a3a33", "g": GREEN, "j": "#8a9a98",
-    "y": "#ffc531", "yd": "#8a6410", "r": "#ff4d6d", "k": "#3f7f76",
-}
+from multimeter import COLORS, COLS, CYAN, DIM, FRAMES, MID, ROWS, render  # noqa: E402
 
 
 def ansi(hex_color):
@@ -37,7 +31,7 @@ def build_frame(chars, classes):
             out.append(c)
         lines.append("".join(out).rstrip() + "\x1b[0m\x1b[K")
     lines.append("")
-    lines.append(ansi(DIM) + "  // AC 115 V - 60 Hz  -  Ctrl+C para salir" + "\x1b[0m\x1b[K")
+    lines.append(ansi(DIM) + "  // AC 115.0 V - 60 Hz - RANGE 200  -  Ctrl+C para salir" + "\x1b[0m\x1b[K")
     return "\n".join(lines)
 
 
@@ -50,7 +44,7 @@ def main():
     if sys.platform == "win32":
         sys.stdout.reconfigure(encoding="utf-8")
 
-    # caché: renderizar los 36 frames toma ~15 s; se regenera si cambia el modelo
+    # caché: renderizar los 36 frames toma unos segundos; se regenera si cambia el modelo
     model = Path(__file__).resolve().parent / "multimeter.py"
     cache = Path(__file__).resolve().parent / ".multimeter_frames.json"
     frames = None
@@ -61,7 +55,7 @@ def main():
     if frames is None:
         frames = []
         for i in range(FRAMES):
-            frames.append(build_frame(*render(2 * np.pi * i / FRAMES, READING)))
+            frames.append(build_frame(*render(2 * np.pi * i / FRAMES)))
             print(f"\rcalibrando multimetro... {i + 1}/{FRAMES}", end="", flush=True)
         cache.write_text(json.dumps({"mtime": model.stat().st_mtime, "frames": frames}), encoding="utf-8")
 

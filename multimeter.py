@@ -1,6 +1,9 @@
-"""Renderiza un multímetro 3D en ASCII girando 360° y lo empaqueta como SVG animado.
+"""Renderiza un multímetro digital 3D en ASCII girando 360° y lo empaqueta como SVG animado.
 
-Ray marching sobre SDFs (numpy), sombreado lambert -> rampa de caracteres.
+Modelo inspirado en un multímetro de bolsillo clásico: carcasa naranja, panel gris,
+LCD azul retroiluminado, selector rotativo y puntas de prueba conectadas.
+Ray marching sobre SDFs (numpy) + sombreado lambert -> rampa de caracteres por material.
+
 Uso:  py multimeter.py   ->  multimeter.svg
 """
 from pathlib import Path
@@ -19,33 +22,47 @@ GREEN = "#00ff9c"
 CYAN = "#00e5ff"
 ICE = "#b8fcff"
 
-READING = "115V~"    # lo que muestra el display: 115 V de corriente alterna (~ = AC)
+READING = "115.0 V~"   # lo que muestra el LCD: 115 V de corriente alterna
 
-COLS, ROWS = 72, 48
-CW, CH = 7, 12            # px por celda
+COLS, ROWS = 80, 56
+CW, CH = 7, 12            # px por celda en el SVG
 FRAMES = 36
 DURATION = 5.4            # s por vuelta
-VIEW_W = 4.4              # unidades de mundo visibles a lo ancho
+VIEW_W = 4.3              # unidades de mundo visibles a lo ancho
 VIEW_H = VIEW_W / COLS * ROWS * CH / CW
-CENTER_Y = -0.38
-TILT = np.radians(14)
+CENTER_Y = -0.2
+TILT = np.radians(10)
+CELL_X = VIEW_W / COLS                      # ancho de una columna sobre el panel
+CELL_Y = VIEW_H / ROWS / np.cos(TILT)       # alto de una fila sobre el panel (compensa la inclinación)
 
-# materiales
-BODY, SCREEN, DIAL, BUTTON, JACK, RED, BLACK, BUMPER, POINTER = range(1, 10)
+# ---------- materiales y colores ----------
+HOUSING, FACE, LCD, KNOB, KNOB_BAR, BLUE, JACK_RED, JACK_BLACK, PROBE_RED, PROBE_BLACK = range(1, 11)
+
+COLORS = {
+    "od": "#7a3a06", "o": "#ff8a1f", "oh": "#ffc07a",      # carcasa y perilla naranja
+    "f": "#26302f", "f2": "#3e4b4d",                       # panel gris oscuro
+    "lcd": "#3d6bff", "lcdd": "#0a1550",                   # LCD azul y sus dígitos
+    "bl": "#2f6bff", "blh": "#8fb0ff",                     # botones azules
+    "w": "#e8eef0", "y": "#ffd23f",                        # serigrafía
+    "jr": "#d81e3a", "jk": "#55605f",                      # jacks
+    "r": "#ff3b4f", "rd": "#a3172a", "k": "#7d8b8e", "kd": "#3a4446",  # puntas
+}
 
 # rampa de caracteres y clases de color por material (de oscuro a claro)
 MATERIAL_LOOK = {
-    BODY:   (".,:;+*", ["d", "d", "m", "m", "b"]),
-    SCREEN: (":;+", ["d"]),
-    BUMPER: (":;+*#%@", ["yd", "yd", "y", "y"]),
-    DIAL:   ("+*#%@@", ["b", "b", "h", "h"]),
-    BUTTON: (";+*#%", ["m", "b", "h"]),
-    JACK:   ("oO@", ["j"]),
-    RED:    (":+*#%@", ["r"]),
-    BLACK:  (":+*#%@", ["k"]),
+    HOUSING:     (":;+*#%@", ["od", "od", "o", "o", "oh"]),
+    FACE:        ("..:", ["f", "f", "f2"]),
+    LCD:         (".:;", ["f", "f2"]),           # paredes del hueco del LCD
+    KNOB:        ("=+*#", ["od", "o", "o"]),
+    KNOB_BAR:    ("#%@@", ["o", "oh", "oh"]),
+    BLUE:        ("+*#%@", ["bl", "bl", "blh"]),
+    JACK_RED:    ("oO@", ["jr"]),
+    JACK_BLACK:  ("oO@", ["jk"]),
+    PROBE_RED:   (":+*#%@", ["rd", "r", "r"]),
+    PROBE_BLACK: (":+*#%@", ["kd", "k", "k"]),
 }
 
-# fuente 3x5 para el display
+# ---------- LCD: fuente 3x5 ----------
 GLYPHS = {
     "0": ["###", "#.#", "#.#", "#.#", "###"],
     "1": [".#.", "##.", ".#.", ".#.", "###"],
@@ -67,11 +84,62 @@ GLYPHS = {
 def lcd_bitmap(text):
     rows = [""] * 5
     for ch in text:
-        g = GLYPHS[ch]
         for r in range(5):
-            rows[r] += g[r] + "."
+            rows[r] += GLYPHS[ch][r] + "."
+    rows = ["." + r for r in rows]
+    if len(rows[0]) % 2:  # ancho par: el LCD queda alineado con la rejilla de columnas
+        rows = [r + "." for r in rows]
     pad = "." * len(rows[0])
     return [pad] + rows + [pad]
+
+
+LCD_BMP = lcd_bitmap(READING)
+LCD_Y = 1.0
+LCD_HX = len(LCD_BMP[0]) * CELL_X / 2
+LCD_HY = len(LCD_BMP) * CELL_Y / 2
+DIAL_Y = -0.42
+JACK_Y = -1.4
+POINTER_DEG = 35  # la perilla apunta a V~ 200
+
+
+# ---------- serigrafía (decals) sobre el panel, botones y perilla ----------
+def build_decals():
+    decals = {FACE: {}, BLUE: {}, KNOB_BAR: {}}
+
+    def put(mat, text, x, y, cls, align="c"):
+        x0 = x - len(text) * CELL_X / 2 if align == "c" else x - len(text) * CELL_X if align == "r" else x
+        ix0, iy = int(np.floor(x0 / CELL_X + 0.5)), int(np.floor(y / CELL_Y))
+        for k, ch in enumerate(text):
+            decals[mat][(ix0 + k, iy)] = (ch, cls)
+
+    put(FACE, "tavoMend", -0.42, 1.5, "o")
+    put(FACE, "DMM-115", 0.5, 1.5, "w")
+    put(BLUE, "H", -0.6, 0.42, "w")
+    put(BLUE, "*", 0.62, 0.44, "w")
+    for deg in np.linspace(215, -35, 16):  # puntos de las posiciones del selector
+        a = np.radians(deg)
+        put(FACE, "•", 0.64 * np.cos(a), DIAL_Y + 0.64 * np.sin(a), "w")
+
+    def label(text, deg, r, cls, align="c"):
+        a = np.radians(deg)
+        put(FACE, text, r * np.cos(a), DIAL_Y + r * np.sin(a), cls, align)
+
+    label("OFF", 90, 0.82, "y")
+    label("V~", 35, 0.84, "w", "l")
+    label("V=", 145, 0.84, "w", "r")
+    label("A", -5, 0.8, "w", "l")
+    label("Ω", 192, 0.8, "w", "r")
+    label("°C", -40, 0.8, "w", "l")
+    put(FACE, "CAT II", -0.55, -1.0, "w")
+    put(FACE, "10A", -0.55, -1.16, "y")
+    put(FACE, "COM", 0.0, -1.16, "w")
+    put(FACE, "VΩmA", 0.55, -1.16, "y")
+    a = np.radians(POINTER_DEG)
+    put(KNOB_BAR, "•", 0.36 * np.cos(a), DIAL_Y + 0.36 * np.sin(a), "w")
+    return decals
+
+
+DECALS = build_decals()
 
 
 # ---------- SDF primitivas ----------
@@ -101,39 +169,51 @@ def sd_capsule(p, a, b, r):
     return length(pa - h[:, None] * ba) - r
 
 
-SCR_C, SCR_B = (0.0, 0.95, 0.30), (0.672, 0.39, 0.09)  # 22x7 celdas: 1 pixel del LCD por carácter
+def rotate_xy(q, deg):
+    a = np.radians(deg)
+    c, s = np.cos(a), np.sin(a)
+    return np.stack([c * q[:, 0] + s * q[:, 1], -s * q[:, 0] + c * q[:, 1], q[:, 2]], -1)
+
+
+def rotate_yz(q, deg):
+    a = np.radians(deg)
+    c, s = np.cos(a), np.sin(a)
+    return np.stack([q[:, 0], c * q[:, 1] + s * q[:, 2], -s * q[:, 1] + c * q[:, 2]], -1)
 
 
 def scene(p):
-    """Devuelve (distancia, material) en espacio objeto."""
-    body = sd_round_box(p, (0, 0.2, 0), (0.98, 1.53, 0.30), 0.12)
-    recess = sd_box(p, SCR_C, SCR_B)
-    shell = np.maximum(body, -recess)
-    mat = np.where(-recess > body, SCREEN, BODY)
-    d = shell
+    """Devuelve (distancia, material) en espacio objeto. El frente mira a +z."""
+    outer = sd_round_box(p, (0, 0, 0), (1.1, 1.85, 0.3), 0.22)
+    face_cut = sd_box(p, (0, 0.02, 0.45), (0.9, 1.68, 0.19))       # panel hundido: piso en z=0.26
+    d = np.maximum(outer, -face_cut)
+    mat = np.where(-face_cut > outer, FACE, HOUSING)
+    lcd_cut = sd_box(p, (0, LCD_Y, 0.26), (LCD_HX, LCD_HY, 0.05))
+    mat = np.where(-lcd_cut > d, LCD, mat)
+    d = np.maximum(d, -lcd_cut)
 
     def add(dist, m):
         nonlocal d, mat
         mat = np.where(dist < d, m, mat)
         d = np.minimum(d, dist)
 
-    add(sd_round_box(p, (0, 0.2, 0), (1.1, 1.65, 0.17), 0.15), BUMPER)
-    add(sd_round_box(p, (0, 0.05, -0.3), (0.72, 1.0, 0.06), 0.04), BUTTON)  # tapa de batería
-    add(sd_round_box(p, (0, 1.25, -0.33), (0.5, 0.08, 0.05), 0.03), DIAL)   # soporte
-    add(sd_cyl_z(p, 0, -0.28, 0.56, 0.0, 0.34), BUTTON)            # aro de la perilla
-    add(sd_cyl_z(p, 0, -0.28, 0.46, 0.0, 0.44), DIAL)
-    add(sd_box(p, (0, -0.06, 0.46), (0.05, 0.2, 0.04)), POINTER)
-    for x in (-0.48, 0.0, 0.48):
-        add(sd_round_box(p, (x, 0.43, 0.3), (0.16, 0.06, 0.05), 0.03), BUTTON)
-    for x in (-0.6, 0.0, 0.6):
-        add(sd_cyl_z(p, x, -1.07, 0.11, 0.0, 0.38), JACK)
-    # puntas de prueba: cable + mango
-    for sx, m in ((-1, RED), (1, BLACK)):
-        jack = (0.6 * sx, -1.07, 0.38)
-        knee = (0.95 * sx, -1.85, 0.75)
-        tip = (1.05 * sx, -2.45, 0.95)
-        add(sd_capsule(p, jack, knee, 0.05), m)
-        add(sd_capsule(p, knee, tip, 0.1), m)
+    # botones H y luz
+    add(sd_round_box(p, (-0.6, 0.42, 0.28), (0.17, 0.12, 0.05), 0.04), BLUE)
+    add(sd_cyl_z(p, 0.62, 0.44, 0.11, 0.2, 0.33), BLUE)
+    # selector: disco + barra apuntando a V~
+    add(sd_cyl_z(p, 0, DIAL_Y, 0.5, 0.2, 0.36), KNOB)
+    bar = rotate_xy(p - np.array([0, DIAL_Y, 0.42]), POINTER_DEG - 90)
+    add(sd_round_box(bar, (0, 0, 0), (0.11, 0.48, 0.07), 0.04), KNOB_BAR)
+    # jacks 10A / COM / VΩmA
+    for x, m in ((-0.55, JACK_RED), (0.0, JACK_BLACK), (0.55, JACK_RED)):
+        add(sd_cyl_z(p, x, JACK_Y, 0.12, 0.2, 0.31), m)
+    # puntas: negra en COM, roja en VΩmA
+    for x, end, m in ((0.0, (-0.45, -2.3, 0.85), PROBE_BLACK), (0.55, (0.95, -2.3, 0.85), PROBE_RED)):
+        knee = (x, JACK_Y - 0.08, 0.62)
+        add(sd_capsule(p, (x, JACK_Y, 0.3), knee, 0.085), m)
+        add(sd_capsule(p, knee, end, 0.045), m)
+    # soporte trasero abierto
+    stand = rotate_yz(p - np.array([0, -0.55, -0.52]), -14.8)
+    add(sd_round_box(stand, (0, 0, 0), (0.5, 0.88, 0.03), 0.02), HOUSING)
     return d, mat
 
 
@@ -147,7 +227,7 @@ def rot_x(a):
     return np.array([[1, 0, 0], [0, c, -s], [0, s, c]])
 
 
-def render(theta, reading):
+def render(theta):
     world_to_obj = rot_y(-theta) @ rot_x(-TILT)
 
     def sdf(pw):
@@ -161,7 +241,7 @@ def render(theta, reading):
 
     t = np.zeros(len(ro))
     hit = np.zeros(len(ro), bool)
-    for _ in range(120):
+    for _ in range(140):
         p = ro + t[:, None] * rd
         d, _ = sdf(p)
         hit |= d < 1e-3
@@ -178,14 +258,13 @@ def render(theta, reading):
         sdf(p + [0, 0, e])[0] - sdf(p - [0, 0, e])[0],
     ], -1)
     n /= np.maximum(length(n)[:, None], 1e-9)
-    light = np.array([-0.6, 0.5, 0.65])
+    light = np.array([-0.55, 0.5, 0.67])
     light /= np.linalg.norm(light)
     shade = np.clip(0.1 + 0.9 * np.clip(n @ light, 0, 1), 0, 0.999)
 
     po = p @ world_to_obj.T
     no = n @ world_to_obj.T
-    bmp = lcd_bitmap(reading)
-    bh, bw = len(bmp), len(bmp[0])
+    bh, bw = len(LCD_BMP), len(LCD_BMP[0])
 
     chars, classes = [], []
     for i in range(len(ro)):
@@ -194,21 +273,24 @@ def render(theta, reading):
             classes.append("")
             continue
         m, s = mat[i], shade[i]
-        if m == SCREEN and no[i, 2] > 0.7:
-            u = (po[i, 0] - (SCR_C[0] - SCR_B[0])) / (2 * SCR_B[0])
-            v = ((SCR_C[1] + SCR_B[1]) - po[i, 1]) / (2 * SCR_B[1])
-            lit = bmp[min(bh - 1, max(0, int(v * bh)))][min(bw - 1, max(0, int(u * bw)))] == "#"
-            ch, cls = ("#", "g") if lit else (".", "s")
-        elif m == POINTER:
-            ch, cls = "#", "g"
-        else:
-            # cada material tiene su propia rampa: así las piezas se distinguen
-            # aunque reciban la misma luz
-            ramp, tones = MATERIAL_LOOK.get(m, MATERIAL_LOOK[BODY])
-            ch = ramp[int(s * len(ramp))]
-            cls = tones[int(s * len(tones))]
-        chars.append(ch)
-        classes.append(cls)
+        front = no[i, 2] > 0.6
+        if m == LCD and front:
+            col = int((po[i, 0] + LCD_HX) / (2 * LCD_HX) * bw)
+            row = int((LCD_Y + LCD_HY - po[i, 1]) / (2 * LCD_HY) * bh)
+            lit = LCD_BMP[min(bh - 1, max(0, row))][min(bw - 1, max(0, col))] == "#"
+            chars.append("█")
+            classes.append("lcdd" if lit else "lcd")
+            continue
+        if front and m in DECALS:
+            key = (int(np.floor(po[i, 0] / CELL_X)), int(np.floor(po[i, 1] / CELL_Y)))
+            if key in DECALS[m]:
+                ch, cls = DECALS[m][key]
+                chars.append(ch)
+                classes.append(cls)
+                continue
+        ramp, tones = MATERIAL_LOOK[m]
+        chars.append(ramp[int(s * len(ramp))])
+        classes.append(tones[int(s * len(tones))])
     return chars, classes
 
 
@@ -244,37 +326,34 @@ def frame_svg(chars, classes, idx):
 def main():
     frames = []
     for i in range(FRAMES):
-        theta = 2 * np.pi * i / FRAMES
-        frames.append(frame_svg(*render(theta, READING), i))
+        frames.append(frame_svg(*render(2 * np.pi * i / FRAMES), i))
         print(f"\rframe {i + 1}/{FRAMES}", end="", flush=True)
     print()
 
-    ox, oy = 48, 64
+    ox, oy = 44, 64
     w, h = COLS * CW + ox * 2, ROWS * CH + oy + 56
     pct = 100 / FRAMES
-    svg = f'''<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}" role="img" aria-label="Multímetro en ASCII girando 360 grados">
-<title>Multímetro ASCII — spin 360°</title>
+    palette = " ".join(f".{k} {{ fill: {v}; }}" for k, v in COLORS.items())
+    svg = f'''<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}" role="img" aria-label="Multímetro digital en ASCII girando 360 grados, marcando 115 V de corriente alterna">
+<title>Multímetro ASCII — 115.0 V~ — spin 360°</title>
 <defs>
   <linearGradient id="scan" x1="0" y1="0" x2="0" y2="1">
     <stop offset="0" stop-color="{CYAN}" stop-opacity="0"/>
-    <stop offset=".5" stop-color="{CYAN}" stop-opacity=".14"/>
+    <stop offset=".5" stop-color="{CYAN}" stop-opacity=".12"/>
     <stop offset="1" stop-color="{CYAN}" stop-opacity="0"/>
   </linearGradient>
-  <radialGradient id="glow" cx=".5" cy=".5" r=".5">
-    <stop offset="0" stop-color="{CYAN}" stop-opacity=".09"/>
-    <stop offset="1" stop-color="{CYAN}" stop-opacity="0"/>
+  <radialGradient id="glow" cx=".5" cy=".45" r=".5">
+    <stop offset="0" stop-color="#ff8a1f" stop-opacity=".07"/>
+    <stop offset="1" stop-color="#ff8a1f" stop-opacity="0"/>
   </radialGradient>
   <pattern id="lines" width="4" height="4" patternUnits="userSpaceOnUse">
-    <rect width="4" height="1" fill="#000" opacity=".35"/>
+    <rect width="4" height="1" fill="#000" opacity=".3"/>
   </pattern>
   <clipPath id="c"><rect width="{w}" height="{h}" rx="14"/></clipPath>
 </defs>
 <style>
   text {{ font-family: {FONT}; font-size: 11px; font-weight: 700; fill: {MID}; }}
-  .d {{ fill: {DIM}; }} .m {{ fill: {MID}; }} .b {{ fill: {CYAN}; }} .h {{ fill: {ICE}; }}
-  .s {{ fill: #0a3a33; }} .g {{ fill: {GREEN}; }} .j {{ fill: #8a9a98; }}
-  .y {{ fill: #ffc531; }} .yd {{ fill: #8a6410; }}
-  .r {{ fill: #ff4d6d; }} .k {{ fill: #3f7f76; }}
+  {palette}
   .f {{ opacity: 0; animation: show {DURATION}s steps(1) infinite; }}
   @keyframes show {{ 0% {{ opacity: 1; }} {pct:.4f}% {{ opacity: 0; }} 100% {{ opacity: 0; }} }}
   .scan {{ animation: sweep 4s linear infinite; }}
@@ -296,7 +375,7 @@ def main():
   <g transform="translate({ox},{oy})">
 {chr(10).join(frames)}
   </g>
-  <text class="lbl" x="24" y="{h - 20}">// AC VOLTAGE · 115 V · 60 Hz · AUTO RANGE</text>
+  <text class="lbl" x="24" y="{h - 20}">// AC VOLTAGE · 115.0 V · 60 Hz · RANGE 200</text>
   <text class="lbl" x="{w - 24}" y="{h - 20}" text-anchor="end">{FRAMES} FRAMES</text>
   <rect class="scan" width="{w}" height="120" fill="url(#scan)"/>
   <rect width="{w}" height="{h}" fill="url(#lines)"/>
